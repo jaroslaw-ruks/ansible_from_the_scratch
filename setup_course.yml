@@ -1,0 +1,31 @@
+---
+- name: Prepare course materials
+  hosts: "{{ target_host | default('servers') }}"
+  become: true
+  vars_files:
+    - vault.yml
+
+  # Automatically uses (the default_user) unless overridden via command line
+  vars:
+    target_user: "{{ vault_users.default_user }}"
+    trening_materials_url: "{{ trening_materials.url }}"
+    trening_materials_user: "{{ trening_materials.user }}"
+    trening_materials_password: "{{ trening_materials.password }}"
+
+  tasks:
+    - name: Download course materials
+      ansible.builtin.get_url:
+        url: "{{ trening_materials_url }}"
+        dest: "/home/{{ target_user }}/courseMaterials.tar.xz"
+        username: "{{ trening_materials_user }}"
+        password: "{{ trening_materials_password }}"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+
+    - name: Extract course materials
+      ansible.builtin.unarchive:
+        src: "/home/{{ target_user }}/courseMaterials.tar.xz"
+        dest: "/home/{{ target_user }}/"
+        remote_src: yes
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"

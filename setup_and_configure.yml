@@ -1,0 +1,77 @@
+---
+- name: Create user with default and custom selection
+  hosts: "{{ target_host | default('servers') }}"
+  become: true
+  vars_files:
+    - vault.yml
+
+  # Automatically uses (the default_user) unless overridden via command line
+  vars:
+    target_user: "{{ vault_users.default_user }}"
+    trening_materials_url: "{{ trening_materials.url }}"
+    trening_materials_user: "{{ trening_materials.user }}"
+    trening_materials_password: "{{ trening_materials.password }}"
+
+  tasks:
+    - name: Ensure user exists with bash shell
+      ansible.builtin.user:
+        name: "{{ target_user }}"
+        shell: /bin/bash
+        groups: 
+          - sudo
+        append: true
+        password_lock: true
+
+    - name: Add SSH public key for the user
+      ansible.builtin.authorized_key:
+        user: "{{ target_user }}"
+        state: present
+        key: "{{ vault_users[target_user].ssh_public_key }}"
+
+    - name: Allow user to switch to root via sudo without a password
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ target_user }}"
+        content: "{{ target_user }} ALL=(ALL) NOPASSWD: ALL\n"
+        mode: '0440'
+        validate: 'visudo -cf %s'
+    
+    - name: Check if the default user already exists on the machine
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ vault_users.default_user }}"
+      ignore_errors: true
+      register: default_user_check
+
+    - name: Conditionally run configuration updates
+      block:
+        - name: Ensure PermitRootLogin is set to no in sshd_config
+          ansible.builtin.lineinfile:
+            path: /etc/ssh/sshd_config
+            regexp: '^PermitRootLogin'
+            line: 'PermitRootLogin no'
+            state: present
+            validate: 'sshd -t -f %s'
+          register: ssh_config_result
+      when: >
+        (target_user == vault_users.default_user) or 
+        (default_user_check.failed == false)        
+
+    - name: Conditionally run configuration updates
+      block:
+        - name: Ensure PasswordAuthentication is set to no in sshd_config
+          ansible.builtin.lineinfile:
+            path: /etc/ssh/sshd_config
+            regexp: '^#PasswordAuthentication yes$'
+            line: 'PasswordAuthentication no'
+            state: present
+            validate: 'sshd -t -f %s'
+          register: ssh_config_result
+      when: >
+        (target_user == vault_users.default_user) or 
+        (default_user_check.failed == false) 
+
+    - name:  Restart ssh service
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
+      when: ssh_config_result.changed
