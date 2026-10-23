@@ -1,0 +1,8 @@
+@all:
+  |--@ungrouped:
+  |--@linux-servers:
+  |  |--@linux-kubernetes:
+  |  |  |--@linux-kubernetes-control-plane:
+  |  |  |  |--k8scp
+  |  |  |--@linux-kubernetes-workers:
+  |  |  |  |--k8scp_w
