@@ -1,0 +1,29 @@
+---
+- name: Install kuberntes
+  hosts: "{{ target_host | default('servers') }}"
+  become: true
+  vars_files:
+    - vault.yml
+
+  tasks:
+    - name: Update repositories cache
+      ansible.builtin.apt:
+        upgrade: yes
+        update_cache: true
+
+    - name: Install basic kuberntes parts 
+      ansible.builtin.apt:
+        name: "{{ item }}"
+      loop:
+        - kubeadm=1.34.2-1.1
+        - kubelet=1.34.2-1.1 
+        - kubectl=1.34.2-1.1
+
+    - name: Hold kuberntes packages
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubeadm
+        - kubelet
+        - kubectl

@@ -1,0 +1,158 @@
+---
+- name: Prepare host for kubernetes installation
+  hosts: "{{ target_host | default('servers') }}"
+  become: true
+  vars_files:
+    - vault.yml
+
+  tasks:
+    - name: Update repositories cache
+      ansible.builtin.apt:
+        upgrade: yes
+        update_cache: true
+
+    - name: Install first part of kubernetes requirements
+      ansible.builtin.apt:
+        pkg:
+          - apt-transport-https
+          - tree
+          - software-properties-common
+          - ca-certificates
+          - socat
+    
+    - name: Disable swap
+      command: swapoff -a
+      become: true
+      when: ansible_swaptotal_mb > 0
+
+    - name: Check demanded kernel modules
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+        persistent: present
+      loop:
+        - overlay
+        - br_netfilter
+
+    - name: Sysctl kubernetes configuration
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/kubernetes.conf
+        content: |
+                  net.bridge.bridge-nf-call-ip6tables = 1
+                  net.bridge.bridge-nf-call-iptables = 1
+                  net.ipv4.ip_forward = 1
+      register: set_sysctl_kubernetes_config
+
+    - name: Check sysctl configuration
+      ansible.builtin.command: sysctl --system
+      register: systctl_result
+      when: set_sysctl_kubernetes_config.changed
+
+    - name: Sysctl command output
+      ansible.builtin.debug:
+        msg: "{{ systctl_result.stdout_lines }}"
+      when: systctl_result.changed
+
+    - name: Create Keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+        recurse: true
+
+    - name: Check if docker pgp key exists
+      stat:
+        path: /etc/apt/keyrings/docker.gpg
+      register: docker_gpg
+
+    - name: Download docker pgp keyring 
+      ansible.builtin.shell:
+        cmd: "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg"
+      when: not docker_gpg.stat.exists
+
+
+    - name: Check if docker repo file exists
+      stat:
+        path: /etc/apt/sources.list.d/docker.list
+      register: docker_list
+
+    - name: dpkg print architecture command result
+      ansible.builtin.command: dpkg --print-architecture
+      register: dpkg_print_architecture_result
+      when: not docker_list.stat.exists
+
+    - name: Lsb_relaese -cs command result
+      ansible.builtin.command: lsb_release -cs
+      register: lsb_release_result
+      when: not docker_list.stat.exists
+
+    - name: Create docker file source list
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/docker.list
+        content: |
+                  deb [arch={{ dpkg_print_architecture_result.stdout }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ lsb_release_result.stdout }} stable
+      when: not docker_list.stat.exists
+
+    - name: Update repository for containerd.io
+      ansible.builtin.apt:
+        upgrade: yes
+        update_cache: true
+
+    - name: Install containerd.io
+      ansible.builtin.apt:
+        pkg:
+          - containerd.io
+
+    - name: Check if containerd config exists
+      stat:
+        path: /etc/containerd/config.toml
+      register: containerd_config          
+
+    - name: Configure containerd
+      ansible.builtin.shell:
+        cmd: "containerd config default | tee /etc/containerd/config.toml"
+      register: set_containerd_config_default
+      when: not containerd_config.stat.exists
+
+    - name: Update containerd System
+      ansible.builtin.lineinfile:
+        path: /etc/containerd/config.toml
+        regexp: '^#SystemdCgroup = false$'
+        line: 'SystemdCgroup = true'
+        state: present
+        #validate: 'sshd -t -f %s'
+      register: containerd_config
+      when: set_containerd_config_default.changed
+
+    - name: Restart containerd service after update config
+      ansible.builtin.service:
+        name: containerd
+        state: restarted
+      when: containerd_config.changed
+
+
+    - name: Check if Kubernetes keyrings exists
+      stat:
+        path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      register: kubernetes_keyring
+
+    - name: Download Kubernetes package repositories
+      ansible.builtin.shell:
+        cmd: curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.34/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      when: not kubernetes_keyring.stat.exists
+
+    - name: Check if kubernetes repo file exists
+      stat:
+        path: /etc/apt/sources.list.d/kubernetes.list
+      register: kubernetes_repo
+
+    - name: Set kubernetes repository list 
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        content: deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.34/deb/ /
+      when: kubernetes_repo
+
+    - name: Update repository for containerd.io
+      ansible.builtin.apt:
+        upgrade: yes
+        update_cache: true
