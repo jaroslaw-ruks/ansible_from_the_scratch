@@ -6,3 +6,6 @@
   |  |  |  |--k8scp
   |  |  |--@linux-kubernetes-workers:
   |  |  |  |--k8scp_w
+  |--@linux-raw:
+  |  |--k8scp
+  |  |--k8scp_w
