@@ -1,0 +1,18 @@
+---
+- name: Prepare host for kubernetes installation
+  hosts: "{{ target_host | default('servers') }}"
+  become: true
+  vars_files:
+    - vault.yml
+
+  tasks: 
+
+    - name: check if crictl config file exsits
+      stat:
+        path: /etc/crictl.yaml
+      register: crictl_config_file
+
+    - name: update crictl runtime-endpoint
+      ansible.builtin.shell:
+        cmd: "crictl config --set runtime-endpoint=unix:///run/containerd/containerd.sock --set image-endpoint=unix:///run/containerd/containerd.sock"
+      when: not crictl_config_file.stat.exists

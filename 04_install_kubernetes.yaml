@@ -12,8 +12,9 @@
         update_cache: true
 
     - name: Install basic kuberntes parts 
-      ansible.builtin.apt:
+      ansible.builtin.package:
         name: "{{ item }}"
+        state: present
       loop:
         - kubeadm=1.34.2-1.1
         - kubelet=1.34.2-1.1 
@@ -27,3 +28,25 @@
         - kubeadm
         - kubelet
         - kubectl
+
+    - name: Set Hostname for cp
+      ansible.builtin.hostname:
+        name: cp
+      when: "'linux_kubernetes_control_plane' in group_names"
+
+    - name: Set Hostname for workers
+      ansible.builtin.hostname:
+        name: worker
+      when: "'linux_kubernetes_workers' in group_names"
+
+    - name: Set if missing
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: "^{{ item }}*"
+        line: "{{ item }}"
+        state: present
+        create: true
+        insertbefore: "127.0.1.1"
+      loop:
+        - "{{ kubernetes.master_ip }} k8scp"
+        - "{{ kubernetes.master_ip }} cp"
